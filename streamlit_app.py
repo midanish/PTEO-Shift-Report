@@ -12,6 +12,10 @@ import json
 import io
 from datetime import datetime
 import time
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class LotTrackingDashboard:
     def __init__(self, spreadsheet_url):
@@ -44,21 +48,30 @@ class LotTrackingDashboard:
         
     def connect_to_sheet(self):
         try:
-            if 'google_credentials' in st.session_state:
-                credentials_dict = st.session_state.google_credentials
-                credentials = Credentials.from_service_account_info(
-                    credentials_dict,
-                    scopes=[
-                        'https://www.googleapis.com/auth/spreadsheets',
-                        'https://www.googleapis.com/auth/drive'
-                    ]
-                )
-                self.gc = gspread.authorize(credentials)
-                self.sheet = self.gc.open_by_url(self.spreadsheet_url).sheet1
-                return True
-            else:
-                st.error("Please upload Google service account credentials")
-                return False
+            credentials_dict = {
+                "type": os.getenv("GOOGLE_SERVICE_ACCOUNT_TYPE"),
+                "project_id": os.getenv("GOOGLE_SERVICE_ACCOUNT_PROJECT_ID"),
+                "private_key_id": os.getenv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID"),
+                "private_key": os.getenv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"),
+                "client_email": os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL"),
+                "client_id": os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_ID"),
+                "auth_uri": os.getenv("GOOGLE_SERVICE_ACCOUNT_AUTH_URI"),
+                "token_uri": os.getenv("GOOGLE_SERVICE_ACCOUNT_TOKEN_URI"),
+                "auth_provider_x509_cert_url": os.getenv("GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL"),
+                "client_x509_cert_url": os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL"),
+                "universe_domain": os.getenv("GOOGLE_SERVICE_ACCOUNT_UNIVERSE_DOMAIN")
+            }
+            
+            credentials = Credentials.from_service_account_info(
+                credentials_dict,
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive'
+                ]
+            )
+            self.gc = gspread.authorize(credentials)
+            self.sheet = self.gc.open_by_url(self.spreadsheet_url).sheet1
+            return True
         except Exception as e:
             st.error(f"Error connecting to Google Sheets: {str(e)}")
             return False
@@ -315,34 +328,17 @@ def main():
             help="Enter the URL of your Google Sheets document"
         )
         
-        # Google Service Account Credentials
+        # Google Service Account Credentials Status
         st.subheader("Google Credentials")
-        uploaded_file = st.file_uploader(
-            "Upload Service Account JSON",
-            type=['json'],
-            help="Upload your Google service account credentials JSON file"
-        )
-        
-        if uploaded_file is not None:
-            try:
-                credentials_dict = json.load(uploaded_file)
-                st.session_state.google_credentials = credentials_dict
-                st.success("✅ Credentials loaded successfully")
-            except Exception as e:
-                st.error(f"Error loading credentials: {str(e)}")
-    
-    # Main dashboard
-    if 'google_credentials' not in st.session_state:
-        st.warning("⚠️ Please upload Google service account credentials in the sidebar to continue")
-        st.info("""
-        **Setup Instructions:**
-        1. Go to Google Cloud Console
-        2. Enable Google Sheets API
-        3. Create a service account
-        4. Download the JSON credentials file
-        5. Upload it using the sidebar
-        """)
-        return
+        if all([
+            os.getenv("GOOGLE_SERVICE_ACCOUNT_TYPE"),
+            os.getenv("GOOGLE_SERVICE_ACCOUNT_PROJECT_ID"),
+            os.getenv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"),
+            os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL")
+        ]):
+            st.success("✅ Credentials loaded from .env file")
+        else:
+            st.error("❌ Credentials not found in .env file")
     
     # Initialize dashboard
     dashboard = LotTrackingDashboard(spreadsheet_url)
