@@ -12,10 +12,6 @@ import json
 import io
 from datetime import datetime
 import time
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class LotTrackingDashboard:
     def __init__(self, spreadsheet_url):
@@ -48,19 +44,7 @@ class LotTrackingDashboard:
         
     def connect_to_sheet(self):
         try:
-            credentials_dict = {
-                "type": os.getenv("GOOGLE_SERVICE_ACCOUNT_TYPE"),
-                "project_id": os.getenv("GOOGLE_SERVICE_ACCOUNT_PROJECT_ID"),
-                "private_key_id": os.getenv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID"),
-                "private_key": os.getenv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"),
-                "client_email": os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL"),
-                "client_id": os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_ID"),
-                "auth_uri": os.getenv("GOOGLE_SERVICE_ACCOUNT_AUTH_URI"),
-                "token_uri": os.getenv("GOOGLE_SERVICE_ACCOUNT_TOKEN_URI"),
-                "auth_provider_x509_cert_url": os.getenv("GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL"),
-                "client_x509_cert_url": os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL"),
-                "universe_domain": os.getenv("GOOGLE_SERVICE_ACCOUNT_UNIVERSE_DOMAIN")
-            }
+            credentials_dict = dict(st.secrets["google_service_account"])
             
             credentials = Credentials.from_service_account_info(
                 credentials_dict,
@@ -330,15 +314,13 @@ def main():
         
         # Google Service Account Credentials Status
         st.subheader("Google Credentials")
-        if all([
-            os.getenv("GOOGLE_SERVICE_ACCOUNT_TYPE"),
-            os.getenv("GOOGLE_SERVICE_ACCOUNT_PROJECT_ID"),
-            os.getenv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"),
-            os.getenv("GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL")
-        ]):
-            st.success("✅ Credentials loaded from .env file")
-        else:
-            st.error("❌ Credentials not found in .env file")
+        try:
+            if "google_service_account" in st.secrets:
+                st.success("✅ Credentials loaded from secrets.toml")
+            else:
+                st.error("❌ Credentials not found in secrets.toml")
+        except Exception:
+            st.error("❌ Credentials not found in secrets.toml")
     
     # Initialize dashboard
     dashboard = LotTrackingDashboard(spreadsheet_url)
