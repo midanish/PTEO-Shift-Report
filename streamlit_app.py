@@ -57,10 +57,10 @@ class LotTrackingDashboard:
                 self.sheet = self.gc.open_by_url(self.spreadsheet_url).sheet1
                 return True
             else:
-                st.error("Please contact our engineers")
+                st.error("Please upload Google service account credentials")
                 return False
         except Exception as e:
-            st.error("Please contact our engineers")
+            st.error(f"Error connecting to Google Sheets: {str(e)}")
             return False
     
     def read_sheet_data(self):
@@ -77,7 +77,7 @@ class LotTrackingDashboard:
             
             return df
         except Exception as e:
-            st.error("Please contact our engineers")
+            st.error(f"Error reading sheet data: {str(e)}")
             return None
     
     def capture_before_shift(self):
@@ -111,12 +111,12 @@ class LotTrackingDashboard:
             self.after_shift_data = st.session_state.after_shift_data
             
         if self.before_shift_data is None or self.after_shift_data is None:
-            st.warning("Please contact our engineers")
+            st.warning("Both before and after shift data needed for analysis")
             return
         
         # Identify processed lots (lots that disappeared)
         if 'LOT NUMBER' not in self.before_shift_data.columns or 'LOT NUMBER' not in self.after_shift_data.columns:
-            st.error("Please contact our engineers")
+            st.error("LOT NUMBER column not found in data")
             return
             
         before_lot_numbers = set(self.before_shift_data['LOT NUMBER'].dropna())
@@ -249,7 +249,7 @@ class LotTrackingDashboard:
     
     def export_data(self):
         if not hasattr(self, 'processed_lots') or not hasattr(self, 'in_progress_lots'):
-            st.warning("Please contact our engineers")
+            st.warning("No analysis data available for export")
             return
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -315,26 +315,25 @@ def main():
             help="Enter the URL of your Google Sheets document"
         )
         
-        # Auto-load hardcoded service account credentials
-        if 'google_credentials' not in st.session_state:
-            credentials_dict = {
-                "type": "service_account",
-                "project_id": "meta-imagery-466510-f7",
-                "private_key_id": "026a9927f285a61537bd4c365d1bdb094451dbea",
-                "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCednjArM6KiQTx\nCgchekPEGjNgnvrw92IruM7mDv1oiRbTZ+KHwg4QpFoNOi41sKAMnpREhZ7DKLqE\naA79Slz0gnPX9LeH1S7nkrb2XtCiAfkxlM70U0oV2DO/w1N4JfltajH6y8vFtki8\n7jW8OPK4umTrHqSbSZTI9zppoWEmEx1eYk9NWZxJzibcjCisJUmRAZzd4UxqyKLN\njvYFnk5U87LxfO/piABDZLAK7VQKalQifjix1JuhBitjEJeMeTZIat92Y22Iuokk\nDuZM+DHMFp5bmDc7Jzhx6ntyPnc1BqrBpjy3UVb+TslQNgVRKAoDvwod19tkxZbv\n1rsfZ2uVAgMBAAECggEADPY6YuJPw7+4/oF4O1oNrH8LKFJgyvClYFet3t4nhtM9\n4X2MJ1gtf9l9vzq82Gnx8Y5QKPm4FpUgip+baEcaqup30Nik4ZDD1S/oVOdFEBdy\nu4ZFVnFwrDBC7WLsEzYh/Lv0yiO875d9RC0FCrgqzIb8pcncI5Klf7nPVqAbevpw\n0MPGD/BqyeCYKRoIvjmKj7upUv+meV/gD9OhGSvPJuLvm71wTIOB6EfuBl3Djj84\nb9EST9x+BENC3Kz2sMyZUv+6dsxdsf8dbIeAkv6UDM32Iv0KTszjYMEFKgmnX/ar\nYvLcf37uyvvnto0A9nZPgMCyUid7qUk3n+o3AR0GWQKBgQDRo8ibBwOzCIm7npMm\n+46ajyvpahdcElIgYn4ZOlxNNXUKGsHM0o4ohuewCiCnP2S2oyWP9rBvr/J7B16E\nD8C39b4xhGWSE0ikPIJHpmvKg7I47TppbfcAmueeBmixy/d1+yAruus1/ssnGonV\nGcX2KqSU1cmuCte+dEdSVAegvQKBgQDBgW8afrwSMLzjyfrH6xkiobG9NeBWRsDR\nia3oIh2ixk8btDC4AKXk4P4Q27deRa2bWMKh1W107ypXq0x8GtJxL499xYpQxjgB\n7q4gY0dockjF5crA7Wa+yY+sSn/ICAIXvz3BskZ6TZJI7DpOHL82YixTpUH2uyzN\nYqblgGj/uQKBgEzgc/Mt2lRwIBoWZ74W58+UCzVYe2J/MXDAzZ8wwKJrpRTkhQc4\ne3svJY1v2VObsrIrF944R7FdY11scWOaZ0DOtEVyWND9k1ju+5OM2uBz9QpdLFt3\nQOoO5DsV/JSeyIuSYNTIgfLWEeewGrVz8x13u8z8rS3OuhkUiQcO25E9AoGADhiF\npWJyBMk0GUvPTtzbWeB5eBUCoIZK6XikCHLjwcW8YYJAwkaZzxBssYGv29gri1Nt\n6igH7yq05On/ilLR3ZjfVQQczUGDNvDSEl3pB7y7fF7+5ArnHyLDqoNKx6F9tYki\n0IdSBvq7m0BKBwKlEysXm4hAQ97ippt3GOS/wVECgYEAqczLPnyokGzpARLFplvp\nOvpNeKueMjb5tkie82v9ClgyKvn2iThSTEF1PzEfnzyoNkvDcnyBWQLlWMWIu+L9\nT+soASPMjLflZAEB9AKSJxDKLNio8Yx0/9guN12/7wl+NxtaGMa/WB1trybAzjEj\n5950L0Cf9jVy5PCrwTVtTEo=\n-----END PRIVATE KEY-----\n",
-                "client_email": "test-200@meta-imagery-466510-f7.iam.gserviceaccount.com",
-                "client_id": "113913956273250298443",
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test-200%40meta-imagery-466510-f7.iam.gserviceaccount.com",
-                "universe_domain": "googleapis.com"
-            }
-            st.session_state.google_credentials = credentials_dict
+        # Google Service Account Credentials
+        st.subheader("Google Credentials")
+        uploaded_file = st.file_uploader(
+            "Upload Service Account JSON",
+            type=['json'],
+            help="Upload your Google service account credentials JSON file"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                credentials_dict = json.load(uploaded_file)
+                st.session_state.google_credentials = credentials_dict
+                st.success("✅ Credentials loaded successfully")
+            except Exception as e:
+                st.error(f"Error loading credentials: {str(e)}")
     
     # Main dashboard
     if 'google_credentials' not in st.session_state:
-        st.warning("Please contact our engineers")
+        st.warning("⚠️ Please upload Google service account credentials in the sidebar to continue")
         st.info("""
         **Setup Instructions:**
         1. Go to Google Cloud Console
@@ -376,7 +375,7 @@ def main():
     with col2:
         if st.button("📤 Capture After Shift Data", type="primary"):
             if not st.session_state.before_shift_captured:
-                st.error("Please contact our engineers")
+                st.error("Please capture before shift data first")
             else:
                 with st.spinner("Capturing after shift data and analyzing..."):
                     dashboard.capture_after_shift()
