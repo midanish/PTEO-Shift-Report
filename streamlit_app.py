@@ -13,7 +13,431 @@ import io
 from datetime import datetime
 import time
 
+class DetapeTracker:
+    """Handles detape monitoring before accessing dashboard"""
+
+    DETAPE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1J3z7ISG1Vbv4uZk0mH97szJXJY6T4sO7J9lhKXQ6pEU/edit?usp=sharing"
+
+    def __init__(self):
+        self.gc = None
+        self.connect_to_sheets()
+
+    def connect_to_sheets(self):
+        """Connect to Google Sheets using service account credentials"""
+        try:
+            credentials_dict = dict(st.secrets["google_service_account"])
+            credentials = Credentials.from_service_account_info(
+                credentials_dict,
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive'
+                ]
+            )
+            self.gc = gspread.authorize(credentials)
+            return True
+        except Exception as e:
+            st.error(f"Error connecting to Google Sheets: {str(e)}")
+            return False
+
+    def record_detape(self, date, package_codes):
+        """Record detape entries to Detape Monitoring sheet"""
+        try:
+            spreadsheet = self.gc.open_by_url(self.DETAPE_SHEET_URL)
+
+            # Try to find the correct worksheet
+            try:
+                detape_sheet = spreadsheet.worksheet("Detape Monitoring")
+            except:
+                worksheets = spreadsheet.worksheets()
+                for name in ["Detape Monitoring", "DetapeMonitoring", "Detape", "Sheet1"]:
+                    try:
+                        detape_sheet = spreadsheet.worksheet(name)
+                        break
+                    except:
+                        continue
+                else:
+                    detape_sheet = worksheets[0]
+
+            # Prepare records - one row per detape with its package code
+            records = []
+            for package_code in package_codes:
+                records.append([date, 1, package_code])  # Each row is 1 detape with its package code
+
+            # Append all records to sheet
+            if records:
+                detape_sheet.append_rows(records)
+            return True
+        except Exception as e:
+            st.error(f"Error recording detape count: {str(e)}")
+            return False
+
+    def show_detape_form(self):
+        """Display detape tracking form"""
+        st.title("📊 Detape Monitoring")
+        st.markdown("---")
+
+        # Check if already completed today
+        today = datetime.now().strftime("%Y-%m-%d")
+        if st.session_state.get('detape_completed_date') == today:
+            st.success(f"Detape count already recorded for today: {st.session_state.get('detape_count', 0)}")
+            if st.button("Re-enter Detape Count"):
+                del st.session_state['detape_completed_date']
+                st.rerun()
+            return True
+
+        # Initialize session state for detape quantity if not exists
+        if 'temp_detape_qty' not in st.session_state:
+            st.session_state.temp_detape_qty = 0
+
+        st.subheader("Daily Detape Count")
+
+        # Detape quantity input OUTSIDE the form so it updates dynamically
+        num_detape = st.number_input(
+            "How many detapes were done?",
+            min_value=0,
+            value=st.session_state.temp_detape_qty,
+            step=1,
+            help="Enter the total number of detapes completed",
+            key="detape_quantity_input"
+        )
+
+        # Update session state
+        st.session_state.temp_detape_qty = num_detape
+
+        # Now create the form with package codes
+        with st.form("detape_form"):
+            # If detapes were done, ask for package codes
+            package_codes = []
+            if num_detape > 0:
+                st.markdown("---")
+                st.subheader(f"Package Codes ({num_detape} required)")
+                st.info(f"📦 Please enter the package code for each detape")
+
+                # Create input fields for each detape
+                for i in range(num_detape):
+                    package_code = st.text_input(
+                        f"Package Code {i+1}",
+                        key=f"package_code_{i}",
+                        placeholder=f"Enter package code for detape {i+1}",
+                        help=f"Package code for detape #{i+1}"
+                    )
+                    package_codes.append(package_code)
+
+            # Friendly reminder
+            st.markdown("---")
+            st.markdown("### 👇 Remember to click the button below to save")
+
+            submitted = st.form_submit_button("✅ Submit Detape Count", type="primary", use_container_width=True)
+
+            if submitted:
+                # Validation
+                if num_detape == 0:
+                    st.warning("No detapes recorded (quantity is 0)")
+                    st.session_state['detape_completed'] = True
+                    st.session_state['detape_completed_date'] = today
+                    st.session_state['detape_count'] = 0
+                    # Clean up temp session state
+                    if 'temp_detape_qty' in st.session_state:
+                        del st.session_state.temp_detape_qty
+                    time.sleep(1)
+                    st.rerun()
+                    return True
+
+                # Check if all package codes are filled
+                empty_codes = [i+1 for i, code in enumerate(package_codes) if not code.strip()]
+                if empty_codes:
+                    st.error(f"❌ Please fill in package code(s) for detape: {', '.join(map(str, empty_codes))}")
+                    return False
+
+                # Record to Google Sheets
+                with st.spinner("Recording detape data..."):
+                    success = self.record_detape(date=today, package_codes=package_codes)
+
+                    if success:
+                        st.session_state['detape_completed'] = True
+                        st.session_state['detape_completed_date'] = today
+                        st.session_state['detape_count'] = num_detape
+                        st.session_state['detape_package_codes'] = package_codes  # Save package codes
+                        # Clean up temp session state
+                        if 'temp_detape_qty' in st.session_state:
+                            del st.session_state.temp_detape_qty
+                        st.success(f"✅ Recorded {num_detape} detape(s) with package codes successfully!")
+                        st.balloons()
+                        time.sleep(1)
+                        st.rerun()
+                        return True
+                    else:
+                        st.error("Failed to record detape data. Please try again.")
+                        return False
+
+        return False
+
+
+class AttendanceTracker:
+    """Handles team attendance tracking before shift starts"""
+
+    MEMBERS_SHEET_URL = "https://docs.google.com/spreadsheets/d/1mTmcjz93wwF_YJUVoKmGPYsFR73KHiyR8l4uUnSyPYk/edit?usp=sharing"
+    ATTENDANCE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1G8_xpSug-dOEODdwLI6wgGphbSNc3Y924IyXoIsyZqs/edit?usp=sharing"
+    FULL_TEAM_SIZE = 3
+    SHIFTS = ["Shift A", "Shift B", "Shift C"]
+
+    def __init__(self):
+        self.gc = None
+        self.members_data = None
+        self.connect_to_sheets()
+
+    def connect_to_sheets(self):
+        """Connect to Google Sheets using service account credentials"""
+        try:
+            credentials_dict = dict(st.secrets["google_service_account"])
+            credentials = Credentials.from_service_account_info(
+                credentials_dict,
+                scopes=[
+                    'https://www.googleapis.com/auth/spreadsheets',
+                    'https://www.googleapis.com/auth/drive'
+                ]
+            )
+            self.gc = gspread.authorize(credentials)
+            return True
+        except Exception as e:
+            st.error(f"Error connecting to Google Sheets: {str(e)}")
+            return False
+
+    def load_team_members(self):
+        """Load team members from PTEO Members sheet"""
+        try:
+            spreadsheet = self.gc.open_by_url(self.MEMBERS_SHEET_URL)
+
+            # Try to find the correct worksheet
+            try:
+                # Try exact match first
+                members_sheet = spreadsheet.worksheet("PTEO Members")
+            except:
+                # If that fails, try to find it by listing all sheets
+                worksheets = spreadsheet.worksheets()
+
+                # Try common variations
+                for name in ["PTEO Members", "PTEOMembers", "PTEO_Members", "Members", "Sheet1"]:
+                    try:
+                        members_sheet = spreadsheet.worksheet(name)
+                        break
+                    except:
+                        continue
+                else:
+                    # Use the first sheet if nothing matches
+                    members_sheet = worksheets[0]
+
+            self.members_data = members_sheet.get_all_records()
+            return True
+        except Exception as e:
+            st.error(f"Error loading team members: {str(e)}")
+            return False
+
+    def get_team_members_for_shift(self, shift):
+        """Get list of team members for a specific shift"""
+        if not self.members_data:
+            return []
+
+        members = []
+
+        # Normalize the selected shift (extract just the letter: "Shift A" -> "A")
+        selected_shift_normalized = shift.replace("Shift ", "").strip()
+
+        for member in self.members_data:
+            # Get member name from various possible column names
+            name = member.get('Name') or member.get('name') or member.get('Member Name') or member.get('member_name')
+
+            # Get shift from various possible column names
+            member_shift = member.get('Shift') or member.get('shift') or member.get('SHIFT')
+
+            if name:
+                # If shift column exists and has a value, filter by it
+                if member_shift and member_shift.strip():
+                    # Normalize member shift (could be "A", "B", "C" or "Shift A", "Shift B", "Shift C")
+                    member_shift_normalized = member_shift.replace("Shift ", "").strip()
+
+                    # Check if this member is assigned to the selected shift
+                    if (member_shift_normalized == selected_shift_normalized or
+                        member_shift_normalized.upper() == "ALL"):
+                        members.append(name)
+                else:
+                    # No shift value, include all members
+                    members.append(name)
+
+        return members
+
+    def record_attendance(self, shift, present_members, absent_members, date):
+        """Record attendance to Attendance Record sheet"""
+        try:
+            spreadsheet = self.gc.open_by_url(self.ATTENDANCE_SHEET_URL)
+
+            # Try to find the correct worksheet
+            try:
+                attendance_sheet = spreadsheet.worksheet("Attendance Record")
+            except:
+                # If that fails, try to find it by listing all sheets
+                worksheets = spreadsheet.worksheets()
+
+                # Try common variations
+                for name in ["Attendance Record", "AttendanceRecord", "Attendance", "Sheet1"]:
+                    try:
+                        attendance_sheet = spreadsheet.worksheet(name)
+                        break
+                    except:
+                        continue
+                else:
+                    # Use the first sheet if nothing matches
+                    attendance_sheet = worksheets[0]
+
+            # Prepare records for all team members
+            records = []
+            all_members = list(set(present_members + absent_members))
+
+            for member in all_members:
+                status = "Present" if member in present_members else "Absent"
+                records.append([date, member, shift, status])
+
+            # Append records to sheet
+            if records:
+                attendance_sheet.append_rows(records)
+                return True
+
+            return False
+        except Exception as e:
+            st.error(f"Error recording attendance: {str(e)}")
+            return False
+
+    def show_attendance_form(self):
+        """Display attendance form and handle submission"""
+        st.title("Team Attendance Check-in")
+        st.markdown("---")
+
+        # Check if already completed today
+        today = datetime.now().strftime("%Y-%m-%d")
+        if st.session_state.get('attendance_completed_date') == today:
+            st.success("Attendance already recorded for today!")
+            if st.button("Re-enter Attendance"):
+                del st.session_state['attendance_completed_date']
+                st.rerun()
+            return True
+
+        with st.form("attendance_form"):
+            st.subheader("Shift Information")
+
+            # Shift selection
+            shift = st.selectbox("Which shift is working?", self.SHIFTS)
+
+            # Load team members
+            if not self.members_data:
+                self.load_team_members()
+
+            team_members = self.get_team_members_for_shift(shift)
+
+            if not team_members:
+                st.warning("Could not load team members. Please check the PTEO Members sheet.")
+                team_members = []
+
+            st.subheader("Team Attendance")
+
+            # Number of present members
+            num_present = st.number_input(
+                f"How many team members are present today? (Full quantity = {self.FULL_TEAM_SIZE})",
+                min_value=0,
+                max_value=self.FULL_TEAM_SIZE,
+                value=self.FULL_TEAM_SIZE,
+                step=1
+            )
+
+            # If less than full team, ask who is absent
+            absent_members = []
+            expected_absent = self.FULL_TEAM_SIZE - num_present
+
+            if num_present < self.FULL_TEAM_SIZE:
+                st.warning(f"⚠️ Team is not at full capacity ({num_present}/{self.FULL_TEAM_SIZE})")
+                st.info(f"📋 You must select exactly **{expected_absent}** absent member(s)")
+
+                if team_members:
+                    absent_members = st.multiselect(
+                        f"Who is absent in this shift? (Select exactly {expected_absent})",
+                        options=team_members,
+                        help=f"You must select exactly {expected_absent} team member(s)",
+                        max_selections=expected_absent  # Enforce limit
+                    )
+
+                    # Real-time validation feedback
+                    if len(absent_members) < expected_absent:
+                        st.error(f"❌ Please select {expected_absent - len(absent_members)} more member(s)")
+                    elif len(absent_members) == expected_absent:
+                        st.success(f"✅ Correct number of absent members selected")
+                else:
+                    # Manual input if team members couldn't be loaded
+                    st.warning("⚠️ Could not load team member list. Please enter names manually.")
+                    absent_input = st.text_area(
+                        f"Enter exactly {expected_absent} absent member name(s) (one per line):",
+                        help="Type each absent member's name on a new line"
+                    )
+                    if absent_input:
+                        absent_members = [name.strip() for name in absent_input.split('\n') if name.strip()]
+
+                        # Real-time validation feedback for manual input
+                        if len(absent_members) < expected_absent:
+                            st.error(f"❌ Please add {expected_absent - len(absent_members)} more name(s)")
+                        elif len(absent_members) > expected_absent:
+                            st.error(f"❌ Too many names! Remove {len(absent_members) - expected_absent} name(s)")
+                        elif len(absent_members) == expected_absent:
+                            st.success(f"✅ Correct number of absent members entered")
+
+            # Friendly reminder for users
+            st.markdown("---")
+            st.markdown("### 👇 Remember to click the button below to save your attendance")
+
+            submitted = st.form_submit_button("✅ Submit Attendance", type="primary", use_container_width=True)
+
+            if submitted:
+                # Validate absence count
+                if num_present < self.FULL_TEAM_SIZE and len(absent_members) != expected_absent:
+                    st.error(f"❌ Please select exactly {expected_absent} absent member(s). You selected {len(absent_members)}.")
+                    return False
+
+                # Determine present members
+                if team_members:
+                    present_members = [m for m in team_members if m not in absent_members]
+                else:
+                    # If we couldn't load team members, just record the count
+                    present_members = [f"Team Member {i+1}" for i in range(num_present)]
+
+                # Record attendance
+                with st.spinner("Recording attendance..."):
+                    success = self.record_attendance(
+                        shift=shift,
+                        present_members=present_members,
+                        absent_members=absent_members,
+                        date=today
+                    )
+
+                    if success:
+                        st.session_state['attendance_completed'] = True
+                        st.session_state['attendance_completed_date'] = today
+                        st.session_state['current_shift'] = shift
+                        st.success(f"Attendance recorded successfully for {shift}!")
+                        st.balloons()
+                        time.sleep(1)
+                        st.rerun()
+                        return True
+                    else:
+                        st.error("Failed to record attendance. Please try again.")
+                        return False
+
+        return False
+
 class LotTrackingDashboard:
+    # Columns to display in detailed data tables
+    DISPLAY_COLUMNS = [
+        'OPERATION', 'STEP NAME', 'PKG_CODE', 'PCKG DESC',
+        'DEVC NAME', 'DEVC NUMBER', 'LOT NUMBER', 'OWNER',
+        'PQQTY', 'QTY', 'OTD STATUS', 'COMMENTS'
+    ]
+
     def __init__(self, spreadsheet_url):
         self.spreadsheet_url = spreadsheet_url
         self.before_shift_data = None
@@ -41,6 +465,18 @@ class LotTrackingDashboard:
             return numeric_qty.sum()
         except:
             return 0
+
+    def filter_display_columns(self, df):
+        """Filter dataframe to only show specified display columns"""
+        if df is None or len(df) == 0:
+            return df
+
+        # Get columns that exist in both the dataframe and DISPLAY_COLUMNS
+        available_columns = [col for col in self.DISPLAY_COLUMNS if col in df.columns]
+
+        if available_columns:
+            return df[available_columns].copy()
+        return df
         
     def connect_to_sheet(self):
         try:
@@ -77,25 +513,86 @@ class LotTrackingDashboard:
             st.error(f"Error reading sheet data: {str(e)}")
             return None
     
+    def filter_critical_lots(self, df):
+        """Filter dataframe to only include critical OTD status or Split Low Yield lots"""
+        if df is None or len(df) == 0:
+            return df
+
+        # First, exclude summary/header rows (Total, No filters applied, etc.)
+        if 'Operation' in df.columns:
+            # Exclude rows where Operation contains "Total" or "No filters applied"
+            exclude_filter = df['Operation'].astype(str).str.contains(
+                'Total|No filters applied',
+                case=False,
+                na=False,
+                regex=True
+            )
+            df = df[~exclude_filter].copy()
+
+        # Create filters for critical lots
+        filters = []
+
+        # Filter 1: Critical OTD Status (NEAR DUE, EXPEDITE OVERDUE, OVERDUE)
+        if 'OTD STATUS' in df.columns:
+            otd_filter = df['OTD STATUS'].str.contains(
+                'NEAR DUE|EXPEDITE OVERDUE|OVERDUE',
+                case=False,
+                na=False,
+                regex=True
+            )
+            filters.append(otd_filter)
+
+        # Filter 2: Split Low Yield lots
+        if 'CATEGORY' in df.columns:
+            split_filter = df['CATEGORY'].str.contains(
+                'ENGR-SPLIT LOW YIELD',
+                case=False,
+                na=False
+            )
+            filters.append(split_filter)
+
+        # Combine filters with OR logic (include if ANY condition is true)
+        if filters:
+            combined_filter = filters[0]
+            for f in filters[1:]:
+                combined_filter = combined_filter | f
+
+            filtered_df = df[combined_filter].copy()
+            return filtered_df
+
+        return df
+
     def capture_before_shift(self):
         data = self.read_sheet_data()
         if data is not None:
-            self.before_shift_data = data.copy()
-            st.session_state.before_shift_data = data.copy()
+            # Filter to only include critical lots
+            filtered_data = self.filter_critical_lots(data)
+
+            self.before_shift_data = filtered_data.copy()
+            st.session_state.before_shift_data = filtered_data.copy()
             st.session_state.before_shift_captured = True
-            unique_lots = data['LOT NUMBER'].nunique() if 'LOT NUMBER' in data.columns else len(data)
-            st.success(f"Before shift data captured: {unique_lots} unique lots")
+
+            total_lots = data['LOT NUMBER'].nunique() if 'LOT NUMBER' in data.columns else len(data)
+            filtered_lots = filtered_data['LOT NUMBER'].nunique() if 'LOT NUMBER' in filtered_data.columns else len(filtered_data)
+
+            st.success(f"Before shift data captured: {filtered_lots} critical lots (out of {total_lots} total)")
             return True
         return False
     
     def capture_after_shift(self):
         data = self.read_sheet_data()
         if data is not None:
-            self.after_shift_data = data.copy()
-            st.session_state.after_shift_data = data.copy()
+            # Filter to only include critical lots
+            filtered_data = self.filter_critical_lots(data)
+
+            self.after_shift_data = filtered_data.copy()
+            st.session_state.after_shift_data = filtered_data.copy()
             st.session_state.after_shift_captured = True
-            unique_lots = data['LOT NUMBER'].nunique() if 'LOT NUMBER' in data.columns else len(data)
-            st.success(f"After shift data captured: {unique_lots} unique lots")
+
+            total_lots = data['LOT NUMBER'].nunique() if 'LOT NUMBER' in data.columns else len(data)
+            filtered_lots = filtered_data['LOT NUMBER'].nunique() if 'LOT NUMBER' in filtered_data.columns else len(filtered_data)
+
+            st.success(f"After shift data captured: {filtered_lots} critical lots (out of {total_lots} total)")
             self.analyze_processed_lots()
             return True
         return False
@@ -125,33 +622,30 @@ class LotTrackingDashboard:
         self.processed_lots = self.before_shift_data[self.before_shift_data['LOT NUMBER'].isin(processed_lot_numbers)]
         self.in_progress_lots = self.before_shift_data[self.before_shift_data['LOT NUMBER'].isin(in_progress_lot_numbers)]
         
-        # Debug output
-        st.info(f"Analysis: {len(processed_lot_numbers)} processed, {len(in_progress_lot_numbers)} in progress")
-        
         # Separate processed lots into regular and split low yield
+        # Note: Data is already filtered for critical OTD status and split low yield at capture time
         if len(self.processed_lots) > 0 and 'CATEGORY' in self.processed_lots.columns:
             processed_split_mask = self.processed_lots['CATEGORY'].str.contains(
-                'ENGR-SPLIT LOW YIELD', 
-                case=False, 
+                'ENGR-SPLIT LOW YIELD',
+                case=False,
                 na=False
             )
             self.processed_split_low_yield_lots = self.processed_lots[processed_split_mask]
             self.processed_regular_lots = self.processed_lots[~processed_split_mask]
-            st.info(f"Processed: {len(self.processed_regular_lots)} regular, {len(self.processed_split_low_yield_lots)} split low yield")
         else:
             self.processed_split_low_yield_lots = pd.DataFrame()
             self.processed_regular_lots = self.processed_lots.copy() if len(self.processed_lots) > 0 else pd.DataFrame()
-        
+
         # Separate in-progress lots into regular and split low yield
+        # Note: Data is already filtered for critical OTD status and split low yield at capture time
         if len(self.in_progress_lots) > 0 and 'CATEGORY' in self.in_progress_lots.columns:
             in_progress_split_mask = self.in_progress_lots['CATEGORY'].str.contains(
-                'ENGR-SPLIT LOW YIELD', 
-                case=False, 
+                'ENGR-SPLIT LOW YIELD',
+                case=False,
                 na=False
             )
             self.in_progress_split_low_yield_lots = self.in_progress_lots[in_progress_split_mask]
             self.in_progress_regular_lots = self.in_progress_lots[~in_progress_split_mask]
-            st.info(f"In Progress: {len(self.in_progress_regular_lots)} regular, {len(self.in_progress_split_low_yield_lots)} split low yield")
         else:
             self.in_progress_split_low_yield_lots = pd.DataFrame()
             self.in_progress_regular_lots = self.in_progress_lots.copy() if len(self.in_progress_lots) > 0 else pd.DataFrame()
@@ -290,16 +784,44 @@ def main():
         page_icon="🏭",
         layout="wide"
     )
-    
-    st.title("🏭 Manufacturing Lot Tracking Dashboard")
-    
+
     # Initialize session state
+    if 'attendance_completed' not in st.session_state:
+        st.session_state.attendance_completed = False
+    if 'detape_completed' not in st.session_state:
+        st.session_state.detape_completed = False
     if 'before_shift_captured' not in st.session_state:
         st.session_state.before_shift_captured = False
     if 'after_shift_captured' not in st.session_state:
         st.session_state.after_shift_captured = False
     if 'analysis_complete' not in st.session_state:
         st.session_state.analysis_complete = False
+
+    # STEP 1: ATTENDANCE CHECK - Must be completed first
+    if not st.session_state.attendance_completed:
+        attendance_tracker = AttendanceTracker()
+        attendance_tracker.show_attendance_form()
+        st.info("✅ Complete attendance to continue")
+        st.stop()  # Block further execution until attendance is complete
+
+    # STEP 2: DETAPE MONITORING - Must be completed after attendance
+    if not st.session_state.detape_completed:
+        detape_tracker = DetapeTracker()
+        detape_tracker.show_detape_form()
+        st.info("✅ Complete detape count to access the dashboard")
+        st.stop()  # Block further execution until detape is complete
+
+    # STEP 3: Show the main dashboard after all checks are complete
+    st.title("🏭 Manufacturing Lot Tracking Dashboard")
+
+    # Display current shift info and completion status
+    col1, col2 = st.columns(2)
+    with col1:
+        if 'current_shift' in st.session_state:
+            st.caption(f"📋 Current Shift: {st.session_state.current_shift}")
+    with col2:
+        if 'detape_count' in st.session_state:
+            st.caption(f"📊 Today's Detape Count: {st.session_state.detape_count}")
     
     # Sidebar for configuration
     with st.sidebar:
@@ -329,12 +851,11 @@ def main():
     with st.expander("📋 Instructions", expanded=True):
         st.markdown("""
         **How to use this dashboard:**
-        
+
         1. **Before Shift**: Click "Capture Before Shift Data" at the start of your shift
-        2. **After Shift**: Click "Capture After Shift Data" at the end of your shift  
+        2. **After Shift**: Click "Capture After Shift Data" at the end of your shift
         3. **Analysis**: The system will automatically analyze which lots were processed
-        4. **Export**: Download the results as CSV files
-        
+
         **What gets tracked:**
         - Lots that were processed (disappeared from the sheet)
         - Lots still in progress (remain on the sheet)
@@ -390,7 +911,20 @@ def main():
     # Results section
     if st.session_state.analysis_complete:
         st.header("📈 Results")
-        
+
+        # Display detape count and package codes
+        if 'detape_count' in st.session_state:
+            st.metric("📊 Detapes Occured Today", st.session_state.detape_count)
+
+            # Display package codes if available
+            if 'detape_package_codes' in st.session_state and st.session_state.detape_package_codes:
+                st.write("**Package Codes:**")
+                # Display as a comma-separated list in white
+                package_codes_display = ", ".join(st.session_state.detape_package_codes)
+                st.markdown(f"<span style='color: white;'>{package_codes_display}</span>", unsafe_allow_html=True)
+
+            st.markdown("---")
+
         # Summary table
         summary_df = dashboard.create_summary_table()
         if summary_df is not None:
@@ -411,11 +945,7 @@ def main():
             categories_chart = dashboard.create_processed_categories_chart()
             if categories_chart:
                 st.plotly_chart(categories_chart, use_container_width=True)
-        
-        # Data export
-        st.header("💾 Export Data")
-        dashboard.export_data()
-        
+
         # Detailed data views
         with st.expander("🔍 View Detailed Data"):
             tab1, tab2, tab3, tab4 = st.tabs([
@@ -429,16 +959,36 @@ def main():
                 if len(dashboard.processed_regular_lots) > 0:
                     # Display metrics in columns
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         count = len(dashboard.processed_regular_lots)
                         st.metric("Processed Regular Lots", f"{count}")
-                    
+
                     with col2:
                         qty_sum = dashboard.safe_qty_sum(dashboard.processed_regular_lots)
                         st.metric("Total QTY", f"{qty_sum:,.0f}")
-                    
-                    df_display = dashboard.processed_regular_lots.astype(str)
+
+                    # Sort by OTD STATUS: 5 OVERDUE, 4 EXPEDITE OVERDUE, 3 NEAR DUE
+                    df_sorted = dashboard.processed_regular_lots.copy()
+                    if 'OTD STATUS' in df_sorted.columns:
+                        # Create sort key based on OTD status priority
+                        def otd_sort_key(status):
+                            status_str = str(status).upper()
+                            if '5' in status_str or 'OVERDUE' in status_str and '4' not in status_str and '3' not in status_str:
+                                return 1  # 5 OVERDUE first
+                            elif '4' in status_str or 'EXPEDITE' in status_str:
+                                return 2  # 4 EXPEDITE OVERDUE second
+                            elif '3' in status_str or 'NEAR DUE' in status_str:
+                                return 3  # 3 NEAR DUE third
+                            else:
+                                return 4  # Others last
+
+                        df_sorted['_sort_key'] = df_sorted['OTD STATUS'].apply(otd_sort_key)
+                        df_sorted = df_sorted.sort_values('_sort_key').drop('_sort_key', axis=1)
+
+                    # Filter to display only specified columns
+                    df_filtered = dashboard.filter_display_columns(df_sorted)
+                    df_display = df_filtered.astype(str)
                     st.dataframe(df_display, use_container_width=True)
                 else:
                     st.info("No processed regular lots found")
@@ -447,16 +997,18 @@ def main():
                 if len(dashboard.processed_split_low_yield_lots) > 0:
                     # Display metrics in columns
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         count = len(dashboard.processed_split_low_yield_lots)
                         st.metric("Processed Split Low Yield Lots", f"{count}")
-                    
+
                     with col2:
                         qty_sum = dashboard.safe_qty_sum(dashboard.processed_split_low_yield_lots)
                         st.metric("Total QTY", f"{qty_sum:,.0f}")
-                    
-                    df_display = dashboard.processed_split_low_yield_lots.astype(str)
+
+                    # Filter to display only specified columns
+                    df_filtered = dashboard.filter_display_columns(dashboard.processed_split_low_yield_lots)
+                    df_display = df_filtered.astype(str)
                     st.dataframe(df_display, use_container_width=True)
                 else:
                     st.info("No processed split low yield lots found")
@@ -465,16 +1017,36 @@ def main():
                 if len(dashboard.in_progress_regular_lots) > 0:
                     # Display metrics in columns
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         count = len(dashboard.in_progress_regular_lots)
                         st.metric("In Progress Regular Lots", f"{count}")
-                    
+
                     with col2:
                         qty_sum = dashboard.safe_qty_sum(dashboard.in_progress_regular_lots)
                         st.metric("Total QTY", f"{qty_sum:,.0f}")
-                    
-                    df_display = dashboard.in_progress_regular_lots.astype(str)
+
+                    # Sort by OTD STATUS: 5 OVERDUE, 4 EXPEDITE OVERDUE, 3 NEAR DUE
+                    df_sorted = dashboard.in_progress_regular_lots.copy()
+                    if 'OTD STATUS' in df_sorted.columns:
+                        # Create sort key based on OTD status priority
+                        def otd_sort_key(status):
+                            status_str = str(status).upper()
+                            if '5' in status_str or 'OVERDUE' in status_str and '4' not in status_str and '3' not in status_str:
+                                return 1  # 5 OVERDUE first
+                            elif '4' in status_str or 'EXPEDITE' in status_str:
+                                return 2  # 4 EXPEDITE OVERDUE second
+                            elif '3' in status_str or 'NEAR DUE' in status_str:
+                                return 3  # 3 NEAR DUE third
+                            else:
+                                return 4  # Others last
+
+                        df_sorted['_sort_key'] = df_sorted['OTD STATUS'].apply(otd_sort_key)
+                        df_sorted = df_sorted.sort_values('_sort_key').drop('_sort_key', axis=1)
+
+                    # Filter to display only specified columns
+                    df_filtered = dashboard.filter_display_columns(df_sorted)
+                    df_display = df_filtered.astype(str)
                     st.dataframe(df_display, use_container_width=True)
                 else:
                     st.info("No in progress regular lots found")
@@ -483,16 +1055,18 @@ def main():
                 if len(dashboard.in_progress_split_low_yield_lots) > 0:
                     # Display metrics in columns
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         count = len(dashboard.in_progress_split_low_yield_lots)
                         st.metric("In Progress Split Low Yield Lots", f"{count}")
-                    
+
                     with col2:
                         qty_sum = dashboard.safe_qty_sum(dashboard.in_progress_split_low_yield_lots)
                         st.metric("Total QTY", f"{qty_sum:,.0f}")
-                    
-                    df_display = dashboard.in_progress_split_low_yield_lots.astype(str)
+
+                    # Filter to display only specified columns
+                    df_filtered = dashboard.filter_display_columns(dashboard.in_progress_split_low_yield_lots)
+                    df_display = df_filtered.astype(str)
                     st.dataframe(df_display, use_container_width=True)
                 else:
                     st.info("No in progress split low yield lots found")
